@@ -2,7 +2,7 @@
 
 **Reliable and Trustworthy Artificial Intelligence — Assignment #3**
 
-[Marabou](https://github.com/NeuralNetworkVerification/Marabou)를 사용해 MNIST로 학습한 소형 완전연결 신경망의 국소 강건성(local robustness)을 형식적으로 검증하는 프로젝트입니다.
+[Marabou](https://github.com/NeuralNetworkVerification/Marabou)를 사용해 MNIST로 학습한 소형 완전연결 신경망의 국소 강건성(local robustness)을 형식적으로 검증합니다.
 
 ---
 
