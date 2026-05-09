@@ -1,247 +1,387 @@
+"""
+test.py
+
+Run the main Marabou local robustness verification experiment.
+If a counterexample is found (SAT), automatically visualises the result.
+
+Verification property:
+  For a reference input x classified as digit d,
+  verify whether every x' with ||x' - x||_inf <= epsilon
+  is also classified as d.
+
+Encoding:
+  Instead of using a disjunction constraint, this script runs separate
+  pairwise queries for each target class j != d.
+
+  For each target j, Marabou checks whether there exists x' such that:
+
+      output[j] >= output[d]
+
+  This is encoded as:
+
+      output[d] - output[j] <= 0
+
+Interpretation:
+  - If any target query is SAT:
+      A counterexample exists. The property is violated.
+      -> adversarial_example.npy and adversarial_visualisation.png are saved.
+  - If all target queries are UNSAT:
+      The model is locally robust for this sample and epsilon.
+"""
+
 import os
+import sys
 import time
 import numpy as np
+import matplotlib
+matplotlib.use("Agg")   # 디스플레이 없는 환경(서버 등)에서도 동작하도록 설정
+import matplotlib.pyplot as plt
 
-from maraboupy import Marabou
-
-
-ONNX_MODEL_PATH = "models/mnist_mlp.onnx"
-SAMPLE_INPUT_PATH = "data/sample_input.npy"
-SAMPLE_LABEL_PATH = "data/sample_label.npy"
-
-RESULT_DIR = "results"
-LOG_PATH = os.path.join(RESULT_DIR, "verification_log.txt")
-COUNTEREXAMPLE_PATH = os.path.join(RESULT_DIR, "counterexample.npy")
-
-
-def load_sample():
-    if not os.path.exists(SAMPLE_INPUT_PATH):
-        raise FileNotFoundError(
-            f"Sample input not found: {SAMPLE_INPUT_PATH}. "
-            f"Run train_model.py first."
-        )
-
-    if not os.path.exists(SAMPLE_LABEL_PATH):
-        raise FileNotFoundError(
-            f"Sample label not found: {SAMPLE_LABEL_PATH}. "
-            f"Run train_model.py first."
-        )
-
-    x = np.load(SAMPLE_INPUT_PATH).astype(np.float32)
-    label = int(np.load(SAMPLE_LABEL_PATH))
-
-    return x, label
+try:
+    from maraboupy import Marabou
+except ImportError:
+    print(
+        "[ERROR] maraboupy is not installed.\n"
+        "Please build Marabou from source and install maraboupy.\n"
+        "See README.md for instructions."
+    )
+    sys.exit(1)
 
 
-def get_prediction_with_numpy_onnx_reference(x):
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+ONNX_PATH    = "mnist_fc.onnx"
+SAMPLES_PATH = "sample_inputs.npy"
+
+EPSILON      = 0.1   # L-inf 허용 perturbation 반경
+TARGET_DIGIT = 3     # 강건성을 검증할 숫자
+TIMEOUT      = 300   # 쿼리당 타임아웃(초)
+
+RESULTS_DIR     = "results"   # 검증 결과물을 저장할 폴더
+RESULT_LOG_PATH = os.path.join(RESULTS_DIR, "verification_result.txt")
+ADV_PATH        = os.path.join(RESULTS_DIR, "adversarial_example.npy")
+VIS_PATH        = os.path.join(RESULTS_DIR, "adversarial_visualisation.png")
+
+
+# ---------------------------------------------------------------------------
+# Result parsing
+# ---------------------------------------------------------------------------
+def parse_solve_result(result):
     """
-    This function is not used for Marabou verification.
-    The saved sample was already selected as correctly classified during training.
+    Normalize different maraboupy solve() return formats.
 
-    We keep the predicted class equal to the sample label for the verification query.
+    Possible formats:
+      [exit_code, vals, stats]
+      (exit_code, vals, stats)
+      [vals, stats]
+      (vals, stats)
+
+    Return:
+      result_str, vals, stats
     """
-    return None
+    if isinstance(result, (list, tuple)):
+        if len(result) == 3:
+            a, b, c = result
+            if isinstance(a, str):
+                # (result_str, vals, stats) 형태
+                result_str = a.upper()
+                vals, stats = b, c
+            else:
+                # (vals, stats, ?) 형태 — 첫 원소가 문자열이 아님
+                vals, stats = a, b
+                result_str = "SAT" if vals else "UNSAT"
+
+        elif len(result) == 2:
+            a, b = result
+            if isinstance(a, str):
+                # (result_str, vals) 형태
+                result_str = a.upper()
+                vals, stats = b, None
+            else:
+                # (vals, stats) 형태
+                vals, stats = a, b
+                result_str = "SAT" if vals else "UNSAT"
+
+        else:
+            raise RuntimeError(f"Unexpected Marabou solve result length: {len(result)}")
+
+    else:
+        # 딕셔너리 또는 기타 단일 반환값
+        vals  = result
+        stats = None
+        result_str = "SAT" if vals else "UNSAT"
+
+    if vals is None:
+        vals = {}
+
+    return result_str, vals, stats
 
 
-def add_input_constraints(network, input_vars, x, epsilon):
-    """
-    Add L-infinity input perturbation constraints.
-
-    For every pixel i:
-        max(0, x_i - epsilon) <= x'_i <= min(1, x_i + epsilon)
-
-    MNIST pixels are normalized to [0, 1].
-    """
-    x_flat = x.flatten()
-
-    if len(input_vars) != len(x_flat):
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def load_sample(digit):
+    """요청한 숫자의 평탄화된 테스트 샘플(784,)을 반환한다."""
+    samples = np.load(SAMPLES_PATH, allow_pickle=True).item()
+    if digit not in samples:
         raise ValueError(
-            f"Input variable size mismatch. "
-            f"Marabou input vars: {len(input_vars)}, sample size: {len(x_flat)}"
+            f"No sample for digit {digit}. "
+            f"Available digits: {sorted(samples.keys())}"
         )
+    return samples[digit].astype(np.float64)
 
+
+def add_input_bounds(network, input_vars, x, epsilon):
+    """L-inf 볼 입력 제약을 네트워크에 추가한다."""
+    x = x.flatten()
     for i, var in enumerate(input_vars):
-        lower = max(0.0, float(x_flat[i] - epsilon))
-        upper = min(1.0, float(x_flat[i] + epsilon))
+        lo = float(np.clip(x[i] - epsilon, 0.0, 1.0))
+        hi = float(np.clip(x[i] + epsilon, 0.0, 1.0))
+        network.setLowerBound(var, lo)
+        network.setUpperBound(var, hi)
 
-        network.setLowerBound(var, lower)
-        network.setUpperBound(var, upper)
 
-
-def add_counterexample_constraint(network, output_vars, pred_class, target_class):
+def add_target_counterexample_constraint(network, output_vars, digit, target):
     """
-    Add output constraint for searching an adversarial counterexample.
+    Search for a counterexample where:
 
-    We want to check whether there exists x' such that:
+        output[target] >= output[digit]
 
-        output[target_class] >= output[pred_class]
+    Marabou addInequality encodes:
 
-    This means the target class logit is at least as large as the original predicted class logit.
+        sum(coeff_i * var_i) <= scalar
 
-    Marabou's addInequality encodes:
+    So we encode:
 
-        sum(coefficients[i] * variables[i]) <= scalar
+        output[digit] - output[target] <= 0
 
-    Therefore:
-
-        output[pred_class] - output[target_class] <= 0
-
-    is equivalent to:
-
-        output[target_class] >= output[pred_class]
+    disjunction 대신 addInequality를 사용해
+    Marabou 내부 Equation 생성자 버그를 우회한다.
     """
     network.addInequality(
-        [output_vars[pred_class], output_vars[target_class]],
+        [output_vars[digit], output_vars[target]],
         [1.0, -1.0],
         0.0
     )
 
 
-def run_single_target_query(x, pred_class, target_class, epsilon):
-    """
-    Run one Marabou query for a single target class.
-
-    The query asks:
-        Is there any input within the epsilon-ball around x
-        that makes target_class score greater than or equal to pred_class score?
-    """
-    network = Marabou.read_onnx(ONNX_MODEL_PATH)
-
-    input_vars = network.inputVars[0].flatten()
-    output_vars = network.outputVars[0].flatten()
-
-    add_input_constraints(network, input_vars, x, epsilon)
-    add_counterexample_constraint(network, output_vars, pred_class, target_class)
-
-    start_time = time.time()
-    vals, stats = network.solve(verbose=False)
-    runtime = time.time() - start_time
-
-    is_sat = len(vals) > 0
-
-    counterexample = None
-    if is_sat:
-        counterexample = np.array(
-            [vals[var] for var in input_vars],
-            dtype=np.float32
-        ).reshape(1, 28, 28)
-
-    return is_sat, runtime, counterexample
-
-
-def run_verification(epsilon=0.001):
-    """
-    Verify local robustness for a single correctly classified MNIST sample.
-
-    Since this is a 10-class classifier, we run 9 pairwise queries:
-
-        target_class != pred_class
-
-    If every query is UNSAT, then no class can overtake the predicted class
-    within the epsilon-ball. In that case, the model is locally robust for this sample.
-
-    If any query is SAT, Marabou found a counterexample.
-    """
-    if not os.path.exists(ONNX_MODEL_PATH):
-        raise FileNotFoundError(
-            f"ONNX model not found: {ONNX_MODEL_PATH}. "
-            f"Run export_onnx.py first."
-        )
-
-    os.makedirs(RESULT_DIR, exist_ok=True)
-
-    x, label = load_sample()
-
-    # The sample was saved only when the trained model predicted it correctly.
-    pred_class = label
-
-    log_lines = []
-    log_lines.append("Marabou MNIST 10-class Local Robustness Verification")
-    log_lines.append("=" * 60)
-    log_lines.append(f"ONNX model: {ONNX_MODEL_PATH}")
-    log_lines.append(f"Sample label / predicted class: {pred_class}")
-    log_lines.append(f"Epsilon: {epsilon}")
-    log_lines.append("")
-
-    print("\n".join(log_lines))
-
-    robust = True
-    total_runtime = 0.0
-    found_counterexample = None
-    found_target_class = None
-
-    for target_class in range(10):
-        if target_class == pred_class:
-            continue
-
-        print(f"Running query: target_class={target_class}")
-
-        is_sat, runtime, counterexample = run_single_target_query(
-            x=x,
-            pred_class=pred_class,
-            target_class=target_class,
-            epsilon=epsilon
-        )
-
-        total_runtime += runtime
-
-        if is_sat:
-            robust = False
-            found_counterexample = counterexample
-            found_target_class = target_class
-
-            line = (
-                f"Target class {target_class}: SAT "
-                f"(counterexample found), runtime={runtime:.4f}s"
-            )
-            print(line)
-            log_lines.append(line)
-
-            break
-
+def extract_adversarial_input(vals, input_vars):
+    """Marabou 변수 할당 딕셔너리에서 적대적 입력 벡터를 추출한다."""
+    adv_values = []
+    for var in input_vars:
+        var_id = int(var)
+        if var_id in vals:
+            adv_values.append(vals[var_id])
+        elif var in vals:
+            adv_values.append(vals[var])
         else:
-            line = (
-                f"Target class {target_class}: UNSAT "
-                f"(no counterexample), runtime={runtime:.4f}s"
-            )
-            print(line)
-            log_lines.append(line)
+            # Marabou가 고정 변수를 명시적으로 할당하지 않는 드문 경우 — 0.0으로 대체
+            adv_values.append(0.0)
+    return np.array(adv_values, dtype=np.float64)
 
-    log_lines.append("")
-    log_lines.append("=" * 60)
 
-    if robust:
-        result_line = (
-            "Final result: UNSAT for all target classes. "
-            "The model is locally robust for this sample and epsilon."
+# ---------------------------------------------------------------------------
+# Core verification
+# ---------------------------------------------------------------------------
+def run_single_target_query(x, digit, target, epsilon):
+    """
+    Run one pairwise query: does target class beat digit?
+    네트워크는 쿼리마다 새로 로드해야 한다 (Marabou가 객체를 수정하기 때문).
+    """
+    network     = Marabou.read_onnx(ONNX_PATH)
+    input_vars  = network.inputVars[0].flatten()   # shape: (784,)
+    output_vars = network.outputVars[0].flatten()  # shape: (10,)
+
+    add_input_bounds(network, input_vars, x, epsilon)
+    add_target_counterexample_constraint(network, output_vars, digit, target)
+
+    options = Marabou.createOptions(timeoutInSeconds=TIMEOUT, verbosity=0)
+
+    print(f"  target={target}: running Marabou...")
+    t0      = time.time()
+    result  = network.solve(options=options)
+    elapsed = time.time() - t0
+
+    result_str, vals, stats = parse_solve_result(result)
+
+    # SAT이면 적대적 입력 추출
+    adv = extract_adversarial_input(vals, input_vars) if result_str == "SAT" else None
+
+    return {
+        "target": target,
+        "result": result_str,
+        "time":   elapsed,
+        "vals":   vals,
+        "adv":    adv,
+    }
+
+
+def run_verification(digit, epsilon):
+    """
+    Run pairwise robustness verification for one digit against all other classes.
+    하나라도 SAT이면 즉시 반환하고 반례를 보고한다.
+    """
+    x = load_sample(digit)
+
+    print("=" * 60)
+    print("Verifying local robustness")
+    print("=" * 60)
+    print(f"Model        : {ONNX_PATH}")
+    print(f"Target digit : {digit}")
+    print(f"Epsilon      : {epsilon}")
+    print(f"Timeout      : {TIMEOUT}s per query")
+    print()
+
+    results    = []
+    total_time = 0.0
+
+    for target in range(10):
+        if target == digit:
+            continue  # 자기 자신 클래스는 스킵
+
+        result      = run_single_target_query(x=x, digit=digit, target=target, epsilon=epsilon)
+        results.append(result)
+        total_time += result["time"]
+
+        print(f"    result={result['result']}, time={result['time']:.2f}s")
+
+        if result["result"] == "SAT":
+            print()
+            print(f"[SAT] Counterexample found: digit {digit} -> target {target}")
+            return "SAT", total_time, results, result["adv"]
+
+    print()
+    print("[UNSAT] All pairwise target queries were UNSAT.")
+    return "UNSAT", total_time, results, None
+
+
+# ---------------------------------------------------------------------------
+# Visualisation (SAT일 때 자동 실행)
+# ---------------------------------------------------------------------------
+def visualise_counterexample(x, adv, digit):
+    """
+    원본 샘플, perturbation, 적대적 입력을 나란히 시각화하고 PNG로 저장한다.
+    SAT 결과가 나왔을 때 main()에서 자동으로 호출된다.
+    """
+    delta = adv - x   # perturbation 벡터
+
+    fig, axes = plt.subplots(1, 3, figsize=(10, 3.5))
+
+    # 원본 이미지
+    axes[0].imshow(x.reshape(28, 28), cmap="gray", vmin=0, vmax=1)
+    axes[0].set_title(f"Original (digit {digit})")
+    axes[0].axis("off")
+
+    # Perturbation (시각적으로 잘 보이도록 최댓값 기준으로 스케일 조정)
+    scale = np.abs(delta).max()
+    axes[1].imshow(delta.reshape(28, 28), cmap="RdBu", vmin=-scale, vmax=scale)
+    axes[1].set_title("Perturbation (delta)")
+    axes[1].axis("off")
+
+    # 적대적 입력
+    axes[2].imshow(adv.reshape(28, 28), cmap="gray", vmin=0, vmax=1)
+    axes[2].set_title("Adversarial input")
+    axes[2].axis("off")
+
+    # 전체 제목에 perturbation 크기 표시
+    fig.suptitle(
+        f"L-inf: {np.abs(delta).max():.5f}  |  L2: {np.linalg.norm(delta):.5f}",
+        fontsize=11,
+    )
+    plt.tight_layout()
+    plt.savefig(VIS_PATH, dpi=150)
+    plt.close()
+    print(f"Visualisation saved to {VIS_PATH}")
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+def save_log(result_str, total_time, results, digit, epsilon):
+    """검증 결과를 텍스트 파일로 저장한다."""
+    lines = [
+        "Marabou MNIST Local Robustness Verification",
+        "=" * 60,
+        f"Model: {ONNX_PATH}",
+        f"Digit: {digit}",
+        f"Epsilon: {epsilon}",
+        f"Final result: {result_str}",
+        f"Total time: {total_time:.2f}s",
+        "",
+        "Pairwise results:",
+    ]
+    for r in results:
+        lines.append(
+            f"  target={r['target']}, "
+            f"result={r['result']}, "
+            f"time={r['time']:.2f}s"
         )
-        print(result_line)
-        log_lines.append(result_line)
+    with open(RESULT_LOG_PATH, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"Log saved to {RESULT_LOG_PATH}")
 
-    else:
-        result_line = (
-            f"Final result: SAT. "
-            f"A counterexample was found for class {pred_class} -> {found_target_class}."
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+def main():
+    # results/ 폴더가 없으면 자동 생성
+    os.makedirs(RESULTS_DIR, exist_ok=True)
+
+    # 필수 파일 존재 여부 확인
+    if not os.path.exists(ONNX_PATH):
+        print(f"[ERROR] {ONNX_PATH} not found. Run train_model.py first.")
+        sys.exit(1)
+    if not os.path.exists(SAMPLES_PATH):
+        print(f"[ERROR] {SAMPLES_PATH} not found. Run train_model.py first.")
+        sys.exit(1)
+
+    digit   = TARGET_DIGIT
+    epsilon = EPSILON
+
+    result_str, total_time, results, adv = run_verification(digit, epsilon)
+
+    print()
+    print("=" * 60)
+    print("Final summary")
+    print("=" * 60)
+    print(f"Result     : {result_str}")
+    print(f"Total time : {total_time:.2f}s")
+
+    if result_str == "UNSAT":
+        print(
+            f"\nInterpretation:\n"
+            f"  No target class could exceed the digit-{digit} logit\n"
+            f"  within L-inf radius {epsilon}.\n"
+            f"  Therefore, the model is locally robust for this sample."
         )
-        print(result_line)
-        log_lines.append(result_line)
 
-        np.save(COUNTEREXAMPLE_PATH, found_counterexample)
-        save_line = f"Counterexample saved to {COUNTEREXAMPLE_PATH}"
-        print(save_line)
-        log_lines.append(save_line)
+    elif result_str == "SAT":
+        x     = load_sample(digit)
+        delta = adv - x
 
-    runtime_line = f"Total verification runtime: {total_runtime:.4f}s"
-    print(runtime_line)
-    log_lines.append(runtime_line)
+        print(
+            f"\nInterpretation:\n"
+            f"  Marabou found an input within L-inf radius {epsilon}\n"
+            f"  that changes the model's decision away from digit {digit}."
+        )
+        print()
+        print("Counterexample summary:")
+        print(f"  L-inf perturbation : {np.abs(delta).max():.6f}")
+        print(f"  L2 perturbation    : {np.linalg.norm(delta):.6f}")
+        print(f"  Adversarial range  : [{adv.min():.4f}, {adv.max():.4f}]")
+        print(f"  Changed pixels     : {(np.abs(delta) > 1e-6).sum()}")
 
-    with open(LOG_PATH, "w", encoding="utf-8") as f:
-        f.write("\n".join(log_lines))
+        # 적대적 입력 저장
+        np.save(ADV_PATH, adv)
+        print(f"\nAdversarial input saved to {ADV_PATH}")
 
-    print(f"Verification log saved to {LOG_PATH}")
+        # SAT이면 자동으로 시각화 실행
+        visualise_counterexample(x, adv, digit)
+
+    save_log(result_str, total_time, results, digit, epsilon)
 
 
 if __name__ == "__main__":
-    # Start with a very small epsilon.
-    # If it finishes quickly, try 0.005 or 0.01.
-    run_verification(epsilon=0.001)
+    main()
