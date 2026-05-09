@@ -79,12 +79,6 @@ marabou-neural-verification/
 pip install -r requirements.txt
 ```
 
-PCA 분석을 위해 scikit-learn도 설치하세요:
-
-```bash
-pip install scikit-learn
-```
-
 ### 2. Marabou 설치
 
 Marabou는 PyPI에 없으므로 소스 빌드가 필요합니다. 설치 방법은 공식 저장소를 참고하세요:  
