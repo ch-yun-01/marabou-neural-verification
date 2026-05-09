@@ -24,14 +24,24 @@ Encoding:
 Interpretation:
   - If any target query is SAT:
       A counterexample exists. The property is violated.
-      -> adversarial_example.npy and adversarial_visualisation.png are saved.
+      -> results/digit{d}_eps{e}/ 폴더에 결과 저장
   - If all target queries are UNSAT:
       The model is locally robust for this sample and epsilon.
+
+Usage:
+  # 기본값 (digit=3, epsilon=0.1)
+  python test.py
+
+  # 조건 변경
+  python test.py --digit 5 --epsilon 0.05
+  python test.py --digit 7 --epsilon 0.2
 """
 
 import os
 import sys
 import time
+import argparse
+import json
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")   # 디스플레이 없는 환경(서버 등)에서도 동작하도록 설정
@@ -49,19 +59,25 @@ except ImportError:
 
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (기본값 — 커맨드라인 인자로 덮어쓸 수 있음)
 # ---------------------------------------------------------------------------
 ONNX_PATH    = "mnist_fc.onnx"
 SAMPLES_PATH = "sample_inputs.npy"
 
-EPSILON      = 0.1   # L-inf 허용 perturbation 반경
-TARGET_DIGIT = 3     # 강건성을 검증할 숫자
-TIMEOUT      = 300   # 쿼리당 타임아웃(초)
+DEFAULT_DIGIT   = 3      # 강건성을 검증할 숫자
+DEFAULT_EPSILON = 0.1    # L-inf 허용 perturbation 반경
+TIMEOUT         = 300    # 쿼리당 타임아웃(초)
 
-RESULTS_DIR     = "results"   # 검증 결과물을 저장할 폴더
-RESULT_LOG_PATH = os.path.join(RESULTS_DIR, "verification_result.txt")
-ADV_PATH        = os.path.join(RESULTS_DIR, "adversarial_example.npy")
-VIS_PATH        = os.path.join(RESULTS_DIR, "adversarial_visualisation.png")
+
+def make_results_dir(digit: int, epsilon: float) -> str:
+    """
+    실험 조건별 결과 폴더 경로를 반환하고 생성한다.
+    예: results/digit3_eps0.100/
+    덮어쓰기를 방지해 각 실험 결과를 독립적으로 보존한다.
+    """
+    folder = os.path.join("results", f"digit{digit}_eps{epsilon:.3f}")
+    os.makedirs(folder, exist_ok=True)
+    return folder
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +137,7 @@ def parse_solve_result(result):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-def load_sample(digit):
+def load_sample(digit: int) -> np.ndarray:
     """요청한 숫자의 평탄화된 테스트 샘플(784,)을 반환한다."""
     samples = np.load(SAMPLES_PATH, allow_pickle=True).item()
     if digit not in samples:
@@ -132,7 +148,7 @@ def load_sample(digit):
     return samples[digit].astype(np.float64)
 
 
-def add_input_bounds(network, input_vars, x, epsilon):
+def add_input_bounds(network, input_vars, x: np.ndarray, epsilon: float):
     """L-inf 볼 입력 제약을 네트워크에 추가한다."""
     x = x.flatten()
     for i, var in enumerate(input_vars):
@@ -142,7 +158,7 @@ def add_input_bounds(network, input_vars, x, epsilon):
         network.setUpperBound(var, hi)
 
 
-def add_target_counterexample_constraint(network, output_vars, digit, target):
+def add_target_counterexample_constraint(network, output_vars, digit: int, target: int):
     """
     Search for a counterexample where:
 
@@ -166,7 +182,7 @@ def add_target_counterexample_constraint(network, output_vars, digit, target):
     )
 
 
-def extract_adversarial_input(vals, input_vars):
+def extract_adversarial_input(vals: dict, input_vars) -> np.ndarray:
     """Marabou 변수 할당 딕셔너리에서 적대적 입력 벡터를 추출한다."""
     adv_values = []
     for var in input_vars:
@@ -184,7 +200,7 @@ def extract_adversarial_input(vals, input_vars):
 # ---------------------------------------------------------------------------
 # Core verification
 # ---------------------------------------------------------------------------
-def run_single_target_query(x, digit, target, epsilon):
+def run_single_target_query(x: np.ndarray, digit: int, target: int, epsilon: float) -> dict:
     """
     Run one pairwise query: does target class beat digit?
     네트워크는 쿼리마다 새로 로드해야 한다 (Marabou가 객체를 수정하기 때문).
@@ -217,7 +233,7 @@ def run_single_target_query(x, digit, target, epsilon):
     }
 
 
-def run_verification(digit, epsilon):
+def run_verification(digit: int, epsilon: float):
     """
     Run pairwise robustness verification for one digit against all other classes.
     하나라도 SAT이면 즉시 반환하고 반례를 보고한다.
@@ -240,7 +256,7 @@ def run_verification(digit, epsilon):
         if target == digit:
             continue  # 자기 자신 클래스는 스킵
 
-        result      = run_single_target_query(x=x, digit=digit, target=target, epsilon=epsilon)
+        result     = run_single_target_query(x=x, digit=digit, target=target, epsilon=epsilon)
         results.append(result)
         total_time += result["time"]
 
@@ -259,7 +275,7 @@ def run_verification(digit, epsilon):
 # ---------------------------------------------------------------------------
 # Visualisation (SAT일 때 자동 실행)
 # ---------------------------------------------------------------------------
-def visualise_counterexample(x, adv, digit):
+def visualise_counterexample(x: np.ndarray, adv: np.ndarray, digit: int, out_path: str):
     """
     원본 샘플, perturbation, 적대적 입력을 나란히 시각화하고 PNG로 저장한다.
     SAT 결과가 나왔을 때 main()에서 자동으로 호출된다.
@@ -290,24 +306,25 @@ def visualise_counterexample(x, adv, digit):
         fontsize=11,
     )
     plt.tight_layout()
-    plt.savefig(VIS_PATH, dpi=150)
+    plt.savefig(out_path, dpi=150)
     plt.close()
-    print(f"Visualisation saved to {VIS_PATH}")
+    print(f"Visualisation saved to {out_path}")
 
 
 # ---------------------------------------------------------------------------
 # Logging
 # ---------------------------------------------------------------------------
-def save_log(result_str, total_time, results, digit, epsilon):
+def save_log(result_str: str, total_time: float, results: list,
+             digit: int, epsilon: float, out_path: str):
     """검증 결과를 텍스트 파일로 저장한다."""
     lines = [
         "Marabou MNIST Local Robustness Verification",
         "=" * 60,
-        f"Model: {ONNX_PATH}",
-        f"Digit: {digit}",
+        f"Model  : {ONNX_PATH}",
+        f"Digit  : {digit}",
         f"Epsilon: {epsilon}",
-        f"Final result: {result_str}",
-        f"Total time: {total_time:.2f}s",
+        f"Result : {result_str}",
+        f"Time   : {total_time:.2f}s",
         "",
         "Pairwise results:",
     ]
@@ -317,17 +334,29 @@ def save_log(result_str, total_time, results, digit, epsilon):
             f"result={r['result']}, "
             f"time={r['time']:.2f}s"
         )
-    with open(RESULT_LOG_PATH, "w", encoding="utf-8") as f:
+    with open(out_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"Log saved to {RESULT_LOG_PATH}")
+    print(f"Log saved to {out_path}")
 
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
-    # results/ 폴더가 없으면 자동 생성
-    os.makedirs(RESULTS_DIR, exist_ok=True)
+    # 커맨드라인 인자 파싱 — 실험 조건을 바꿀 때 사용
+    parser = argparse.ArgumentParser(description="Marabou MNIST robustness verification")
+    parser.add_argument("--digit",   type=int,   default=DEFAULT_DIGIT,
+                        help=f"Target digit to verify (default: {DEFAULT_DIGIT})")
+    parser.add_argument("--epsilon", type=float, default=DEFAULT_EPSILON,
+                        help=f"L-inf perturbation radius (default: {DEFAULT_EPSILON})")
+    args = parser.parse_args()
+
+    digit   = args.digit
+    epsilon = args.epsilon
+
+    # 실험 조건별 결과 폴더 생성 (예: results/digit3_eps0.100/)
+    out_dir = make_results_dir(digit, epsilon)
+    print(f"Results will be saved to: {out_dir}/\n")
 
     # 필수 파일 존재 여부 확인
     if not os.path.exists(ONNX_PATH):
@@ -336,9 +365,6 @@ def main():
     if not os.path.exists(SAMPLES_PATH):
         print(f"[ERROR] {SAMPLES_PATH} not found. Run train_model.py first.")
         sys.exit(1)
-
-    digit   = TARGET_DIGIT
-    epsilon = EPSILON
 
     result_str, total_time, results, adv = run_verification(digit, epsilon)
 
@@ -374,14 +400,115 @@ def main():
         print(f"  Changed pixels     : {(np.abs(delta) > 1e-6).sum()}")
 
         # 적대적 입력 저장
-        np.save(ADV_PATH, adv)
-        print(f"\nAdversarial input saved to {ADV_PATH}")
+        adv_path = os.path.join(out_dir, "adversarial_example.npy")
+        np.save(adv_path, adv)
+        print(f"\nAdversarial input saved to {adv_path}")
 
         # SAT이면 자동으로 시각화 실행
-        visualise_counterexample(x, adv, digit)
+        vis_path = os.path.join(out_dir, "adversarial_visualisation.png")
+        visualise_counterexample(x, adv, digit, vis_path)
 
-    save_log(result_str, total_time, results, digit, epsilon)
+    # 검증 로그 저장
+    log_path = os.path.join(out_dir, "verification_result.txt")
+    save_log(result_str, total_time, results, digit, epsilon, log_path)
+
+
+# ---------------------------------------------------------------------------
+# Batch runner — digit 1~9, epsilon 0.1 고정
+# ---------------------------------------------------------------------------
+def run_one(digit: int, epsilon: float):
+    """단일 실험을 실행하고 결과를 저장한다."""
+    out_dir = make_results_dir(digit, epsilon)
+    print(f"\nResults will be saved to: {out_dir}/")
+
+    result_str, total_time, results, adv = run_verification(digit, epsilon)
+
+    print()
+    print("=" * 60)
+    print("Final summary")
+    print("=" * 60)
+    print(f"Digit      : {digit}")
+    print(f"Epsilon    : {epsilon}")
+    print(f"Result     : {result_str}")
+    print(f"Total time : {total_time:.2f}s")
+
+    if result_str == "UNSAT":
+        print(
+            f"\nInterpretation:\n"
+            f"  No target class could exceed the digit-{digit} logit\n"
+            f"  within L-inf radius {epsilon}.\n"
+            f"  Therefore, the model is locally robust for this sample."
+        )
+
+    elif result_str == "SAT":
+        x     = load_sample(digit)
+        delta = adv - x
+
+        print(
+            f"\nInterpretation:\n"
+            f"  Marabou found an input within L-inf radius {epsilon}\n"
+            f"  that changes the model's decision away from digit {digit}."
+        )
+        print()
+        print("Counterexample summary:")
+        print(f"  L-inf perturbation : {np.abs(delta).max():.6f}")
+        print(f"  L2 perturbation    : {np.linalg.norm(delta):.6f}")
+        print(f"  Adversarial range  : [{adv.min():.4f}, {adv.max():.4f}]")
+        print(f"  Changed pixels     : {(np.abs(delta) > 1e-6).sum()}")
+
+        # 적대적 입력 저장
+        adv_path = os.path.join(out_dir, "adversarial_example.npy")
+        np.save(adv_path, adv)
+        print(f"\nAdversarial input saved to {adv_path}")
+
+        # SAT이면 자동으로 시각화 실행
+        vis_path = os.path.join(out_dir, "adversarial_visualisation.png")
+        visualise_counterexample(x, adv, digit, vis_path)
+
+    # 검증 로그 저장
+    log_path = os.path.join(out_dir, "verification_result.txt")
+    save_log(result_str, total_time, results, digit, epsilon, log_path)
+
+    return result_str, total_time
 
 
 if __name__ == "__main__":
-    main()
+    # 필수 파일 존재 여부 확인
+    for _path in (ONNX_PATH, SAMPLES_PATH):
+        if not os.path.exists(_path):
+            print(f"[ERROR] {_path} not found. Run train_model.py first.")
+            sys.exit(1)
+
+    # 실험할 epsilon 값 목록 — 강건 / 경계 / 취약 구간을 커버
+    EPSILONS = [0.01, 0.03, 0.05, 0.1, 0.2]
+
+    # digit 1~9 x epsilon 3개 조합 순서대로 실험 실행
+    summary = []
+    for epsilon in EPSILONS:
+        for digit in range(0, 10):
+            print("\n" + "#" * 60)
+            print(f"# Experiment: digit={digit}, epsilon={epsilon}")
+            print("#" * 60)
+            result, elapsed = run_one(digit, epsilon)
+            summary.append({
+                "digit":   digit,
+                "epsilon": epsilon,
+                "result":  result,
+                "time":    round(elapsed, 2),
+            })
+
+    # 전체 실험 요약 출력
+    print("\n" + "=" * 60)
+    print("All experiments complete — summary")
+    print("=" * 60)
+    print(f"{'Digit':>6}  {'Epsilon':>8}  {'Result':>8}")
+    print("-" * 30)
+    for row in summary:
+        print(f"{row['digit']:>6}  {row['epsilon']:>8.3f}  {row['result']:>8}")
+
+    # 전체 실험 결과를 JSON으로 저장
+    os.makedirs("results", exist_ok=True)
+    json_path = os.path.join("results", "summary.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(summary, f, indent=2)
+    print(f"\nSummary saved to {json_path}")

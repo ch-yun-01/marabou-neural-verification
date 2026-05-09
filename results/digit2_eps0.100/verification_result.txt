@@ -1,0 +1,12 @@
+Marabou MNIST Local Robustness Verification
+============================================================
+Model  : mnist_fc.onnx
+Digit  : 2
+Epsilon: 0.1
+Result : SAT
+Time   : 57.84s
+
+Pairwise results:
+  target=0, result=UNSAT, time=26.35s
+  target=1, result=UNSAT, time=31.36s
+  target=3, result=SAT, time=0.13s

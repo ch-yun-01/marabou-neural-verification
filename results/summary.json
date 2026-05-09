@@ -1,0 +1,302 @@
+[
+  {
+    "digit": 0,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.33
+  },
+  {
+    "digit": 1,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.51
+  },
+  {
+    "digit": 2,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.31
+  },
+  {
+    "digit": 3,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.44
+  },
+  {
+    "digit": 4,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.46
+  },
+  {
+    "digit": 5,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.4
+  },
+  {
+    "digit": 6,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.44
+  },
+  {
+    "digit": 7,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.35
+  },
+  {
+    "digit": 8,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.44
+  },
+  {
+    "digit": 9,
+    "epsilon": 0.01,
+    "result": "UNSAT",
+    "time": 0.48
+  },
+  {
+    "digit": 0,
+    "epsilon": 0.03,
+    "result": "UNSAT",
+    "time": 0.51
+  },
+  {
+    "digit": 1,
+    "epsilon": 0.03,
+    "result": "SAT",
+    "time": 0.27
+  },
+  {
+    "digit": 2,
+    "epsilon": 0.03,
+    "result": "UNSAT",
+    "time": 0.44
+  },
+  {
+    "digit": 3,
+    "epsilon": 0.03,
+    "result": "SAT",
+    "time": 0.27
+  },
+  {
+    "digit": 4,
+    "epsilon": 0.03,
+    "result": "SAT",
+    "time": 0.57
+  },
+  {
+    "digit": 5,
+    "epsilon": 0.03,
+    "result": "SAT",
+    "time": 0.3
+  },
+  {
+    "digit": 6,
+    "epsilon": 0.03,
+    "result": "UNSAT",
+    "time": 7.39
+  },
+  {
+    "digit": 7,
+    "epsilon": 0.03,
+    "result": "UNSAT",
+    "time": 0.51
+  },
+  {
+    "digit": 8,
+    "epsilon": 0.03,
+    "result": "SAT",
+    "time": 0.38
+  },
+  {
+    "digit": 9,
+    "epsilon": 0.03,
+    "result": "UNSAT",
+    "time": 1.58
+  },
+  {
+    "digit": 0,
+    "epsilon": 0.05,
+    "result": "UNSAT",
+    "time": 0.51
+  },
+  {
+    "digit": 1,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 0.29
+  },
+  {
+    "digit": 2,
+    "epsilon": 0.05,
+    "result": "UNSAT",
+    "time": 0.51
+  },
+  {
+    "digit": 3,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 1.98
+  },
+  {
+    "digit": 4,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 7.51
+  },
+  {
+    "digit": 5,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 78.56
+  },
+  {
+    "digit": 6,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 0.27
+  },
+  {
+    "digit": 7,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 0.25
+  },
+  {
+    "digit": 8,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 6.94
+  },
+  {
+    "digit": 9,
+    "epsilon": 0.05,
+    "result": "SAT",
+    "time": 0.21
+  },
+  {
+    "digit": 0,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.63
+  },
+  {
+    "digit": 1,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.13
+  },
+  {
+    "digit": 2,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 57.84
+  },
+  {
+    "digit": 3,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.16
+  },
+  {
+    "digit": 4,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.12
+  },
+  {
+    "digit": 5,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.21
+  },
+  {
+    "digit": 6,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.16
+  },
+  {
+    "digit": 7,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 0.17
+  },
+  {
+    "digit": 8,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 7.87
+  },
+  {
+    "digit": 9,
+    "epsilon": 0.1,
+    "result": "SAT",
+    "time": 151.24
+  },
+  {
+    "digit": 0,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 300.33
+  },
+  {
+    "digit": 1,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.14
+  },
+  {
+    "digit": 2,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.12
+  },
+  {
+    "digit": 3,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.14
+  },
+  {
+    "digit": 4,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.13
+  },
+  {
+    "digit": 5,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.14
+  },
+  {
+    "digit": 6,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.12
+  },
+  {
+    "digit": 7,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.14
+  },
+  {
+    "digit": 8,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.12
+  },
+  {
+    "digit": 9,
+    "epsilon": 0.2,
+    "result": "SAT",
+    "time": 0.18
+  }
+]
