@@ -27,14 +27,6 @@ Interpretation:
       -> results/digit{d}_eps{e}/ 폴더에 결과 저장
   - If all target queries are UNSAT:
       The model is locally robust for this sample and epsilon.
-
-Usage:
-  # 기본값 (digit=3, epsilon=0.1)
-  python test.py
-
-  # 조건 변경
-  python test.py --digit 5 --epsilon 0.05
-  python test.py --digit 7 --epsilon 0.2
 """
 
 import os
@@ -44,7 +36,7 @@ import argparse
 import json
 import numpy as np
 import matplotlib
-matplotlib.use("Agg")   # 디스플레이 없는 환경(서버 등)에서도 동작하도록 설정
+matplotlib.use("Agg") 
 import matplotlib.pyplot as plt
 
 try:
@@ -73,7 +65,6 @@ def make_results_dir(digit: int, epsilon: float) -> str:
     """
     실험 조건별 결과 폴더 경로를 반환하고 생성한다.
     예: results/digit3_eps0.100/
-    덮어쓰기를 방지해 각 실험 결과를 독립적으로 보존한다.
     """
     folder = os.path.join("results", f"digit{digit}_eps{epsilon:.3f}")
     os.makedirs(folder, exist_ok=True)
@@ -123,7 +114,6 @@ def parse_solve_result(result):
             raise RuntimeError(f"Unexpected Marabou solve result length: {len(result)}")
 
     else:
-        # 딕셔너리 또는 기타 단일 반환값
         vals  = result
         stats = None
         result_str = "SAT" if vals else "UNSAT"
@@ -413,9 +403,6 @@ def main():
     save_log(result_str, total_time, results, digit, epsilon, log_path)
 
 
-# ---------------------------------------------------------------------------
-# Batch runner — digit 1~9, epsilon 0.1 고정
-# ---------------------------------------------------------------------------
 def run_one(digit: int, epsilon: float):
     """단일 실험을 실행하고 결과를 저장한다."""
     out_dir = make_results_dir(digit, epsilon)
@@ -479,10 +466,10 @@ if __name__ == "__main__":
             print(f"[ERROR] {_path} not found. Run train_model.py first.")
             sys.exit(1)
 
-    # 실험할 epsilon 값 목록 — 강건 / 경계 / 취약 구간을 커버
+    # 실험할 epsilon 값 목록
     EPSILONS = [0.01, 0.03, 0.05, 0.1, 0.2]
 
-    # digit 1~9 x epsilon 3개 조합 순서대로 실험 실행
+    # digit 1~9 x epsilon 5개 조합 순서대로 실험 실행
     summary = []
     for epsilon in EPSILONS:
         for digit in range(0, 10):

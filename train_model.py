@@ -22,16 +22,14 @@ class SmallFC(nn.Module):
     def __init__(self):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(784, 32),   # 입력층 -> 은닉층1
-            nn.ReLU(),            # 활성화 함수 (Marabou가 ReLU를 지원함)
-            nn.Linear(32, 16),    # 은닉층1 -> 은닉층2
-            nn.ReLU(),            # 활성화 함수
-            nn.Linear(16, 10),    # 은닉층2 -> 출력층 (클래스 10개)
+            nn.Linear(784, 32), 
+            nn.ReLU(),           
+            nn.Linear(32, 16),   
+            nn.ReLU(),          
+            nn.Linear(16, 10),    
         )
 
     def forward(self, x):
-        # x 형태: (배치, 1, 28, 28) 또는 (배치, 784)
-        # Marabou는 평탄화된 1차원 입력을 요구하므로 reshape 수행
         x = x.view(x.size(0), -1)
         return self.net(x)
 
@@ -60,7 +58,7 @@ def evaluate(model, loader, criterion, device):
     """Evaluate the model on a dataset; return average loss and accuracy."""
     model.eval()
     total_loss, correct = 0.0, 0
-    with torch.no_grad():   # 평가 시에는 기울기 계산 불필요
+    with torch.no_grad():   # 평가 시
         for images, labels in loader:
             images, labels = images.to(device), labels.to(device)
             outputs = model(images)
@@ -71,7 +69,6 @@ def evaluate(model, loader, criterion, device):
 
 
 def main():
-    # GPU가 있으면 CUDA 사용, 없으면 CPU 사용
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -105,11 +102,8 @@ def main():
     # Export to ONNX
     # ------------------------------------------------------------------
     model.eval()
-    # ※ GPU로 학습한 모델을 반드시 CPU로 이동한 뒤 export해야 한다.
-    #   dummy 텐서가 CPU인데 모델이 CUDA에 남아 있으면
-    #   torch.onnx.export 내부 FakeTensor에서 device 충돌이 발생한다.
     model_cpu = model.cpu()
-    dummy     = torch.zeros(1, 784)  # Marabou는 평탄화된 784차원 입력을 사용
+    dummy     = torch.zeros(1, 784) 
     onnx_path = "mnist_fc.onnx"
     torch.onnx.export(
         model_cpu,
@@ -125,8 +119,7 @@ def main():
     # ------------------------------------------------------------------
     # Save one correctly-classified test sample per digit (0-9)
     # ------------------------------------------------------------------
-    # model_cpu는 위 export 단계에서 이미 CPU로 이동되어 있음
-    samples = {}  # {숫자 레이블: 평탄화된 numpy 배열 (784,)}
+    samples = {}  
     for images, labels in DataLoader(test_dataset, batch_size=1, shuffle=False):
         label = labels.item()
         flat  = images.view(1, 784)
